@@ -1,0 +1,23 @@
+delta dConsoleLog {
+	adds {
+		package com.wappworks.common.log;
+
+		public class LogWriterConsole implements LogWriter {
+			@Override
+			public void logAppend(String logText) {
+				System.out.println(logText);
+			}
+
+			@Override
+			public void setUpLogger(Object obj) {
+			}
+		}
+	}
+	modifies com.wappworks.app.SqliteExporter  {
+		adds import com.wappworks.common.log.LogWriterConsole;
+		
+		adds void dosetLogWriter() {			
+			setLogWriter((LogWriter)(new LogWriterConsole()));			
+		}
+	}
+}

@@ -1,0 +1,171 @@
+delta dXML {
+	modifies com.wappworks.app.sqlite.SqliteTableHandler {
+		adds import java.util.List;
+		adds import java.util.Map;
+		adds import java.io.Writer;
+		adds import java.io.IOException;
+		adds public Boolean exportTableToXml(Writer fOut, String indent,
+			SqliteConverterExportConfig config) throws SQLException, IOException {
+			List<String> excludeList = config.getExcludeList();
+			if(excludeList.contains(tableName)) return(true);
+			if(excludeList.size() == 0) excludeList = null;
+
+			fOut.write(String.format("%1$s<%2$s>\n", indent, tableName));
+
+			String recordIndent = indent + "\t";
+			exportRecordsToXml(fOut, recordIndent, excludeList);
+
+			fOut.write(String.format("%1$s</%2$s>\n", indent, tableName));
+			return(true);
+		}
+
+		adds private void exportRecordsToXml(Writer fOut, String indent, List<String>
+			excludeList) throws SQLException, IOException {
+			Statement dbStat = dbConn.createStatement();
+			ResultSet rs = dbStat.executeQuery(String.format("select * from '%1$s';",
+					tableName));
+			try {
+				while(rs.next()) {
+					fOut.write(String.format("%1$s<%2$sRecord>\n", indent, tableName));
+					for(Map.Entry<String, FieldType> entry : fieldInfo.entrySet()) {
+						String fieldName = entry.getKey();
+
+						if(excludeList != null) {
+							String fieldRefName = tableName + "." + fieldName;
+							if(excludeList.contains(fieldRefName)) continue;
+						}
+
+						fOut.write(String.format("%1$s\t<%2$s>%3$s</%2$s>\n", indent, fieldName,
+								rs.getString(fieldName)));
+					}
+					fOut.write(String.format("%1$s</%2$sRecord>\n", indent, tableName));
+				}
+			}
+			finally {
+				rs.close();
+			}
+		}
+	}
+
+	modifies com.wappworks.app.sqlite.SqliteConverter {
+		adds import java.io.BufferedWriter;
+		adds import java.io.FileWriter;
+		adds import java.io.IOException;
+		adds import java.io.Writer;
+		adds private Boolean exportToXml(File xmlFile, SqliteConverterExportConfig
+			config) {
+			logWriter.logAppend("XML export commencing");
+
+			// Handle the export...
+			try {
+				FileWriter fStream = new FileWriter(xmlFile);
+				BufferedWriter fOut = new BufferedWriter(fStream);
+
+				fOut.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+				fOut.write("<database>\n");
+				exportTablesToXml(fOut, "\t", config);
+				fOut.write("</database>\n");
+
+				fOut.close();
+				fStream.close();
+			}
+			catch(IOException e) {
+				logWriter.logAppend(String.format("I/O error encountered trying to output database to file '%1$s'",
+						xmlFile.getAbsolutePath()));
+				return(false);
+			}
+
+			logWriter.logAppend("XML export complete");
+			return(true);
+		}
+
+		adds private void exportTablesToXml(Writer fOut, String indent,
+			SqliteConverterExportConfig config) {
+			for(SqliteTableHandler tableHandler : tableHandlers) {
+				try {
+					logWriter.logAppend(String.format("Exporting contents for table '%1$s'",
+							tableHandler.getName()));
+					tableHandler.exportTableToXml(fOut, indent, config);
+				}
+				catch(SQLException e) {
+					logWriter.logAppend(String.format("SQL exception occured trying to export table '%1$s'",
+							tableHandler.getName()));
+				}
+				catch(IOException e) {
+					logWriter.logAppend(String.format("I/O exception occured trying to export table '%1$s'",
+							tableHandler.getName()));
+				}
+			}
+		}
+		modifies export(File outFile, ExportFormat format,
+			SqliteConverterExportConfig config) {
+			original(outFile, format, config);
+			if(format == ExportFormat.XML) return(exportToXml(outFile, config));
+			else return false;
+
+		}
+	}
+	modifies com.wappworks.app.SqliteExporterFrame {
+		adds private PanelFileSelection xmlFileOutSelection;
+		adds private static final FileNameExtensionFilter fileFilterXml = new
+		FileNameExtensionFilter("XML (xml, txt)", "xml", "txt");
+		adds private static final String PREF_FILEPATH_XML = "filepath_xml";
+
+		modifies setupButtons() {
+			original();
+
+			xmlFileOutSelection = new PanelFileSelection("Output XML...", fileFilterXml,
+				false);
+			xmlFileOutSelection.addChangeListener(this);
+			xmlFileOutSelection.setLogWriter(logWriter);
+			topPanel.add(xmlFileOutSelection);
+
+			window.add(topPanel, BorderLayout.PAGE_START);
+		}
+		modifies restorePrefs() {
+
+			original();
+
+			xmlFileOutSelection.setLastSelectedFile(prefs.get(PREF_FILEPATH_XML, ""));
+		}
+
+		modifies stateChanged(ChangeEvent evt) {
+			original(evt);
+
+			if(evt.getSource() == xmlFileOutSelection) {
+				addLogText(String.format("Selected XML export target as '%1$s'",
+						xmlFileOutSelection.getLastSelectedFilePath()));
+				prefs.put(PREF_FILEPATH_XML,
+					xmlFileOutSelection.getLastSelectedFilePath());
+				return;
+			}
+		}
+
+		modifies handleExportGui() {
+			original();
+
+			// Set up the common export configuration
+			SqliteConverterExportConfig commonConfig = new SqliteConverterExportConfig();
+			JSONObject exportConfig = getExportConfig();
+			if(exportConfig != null) {
+				JSONObject jsonConfigCommon = exportConfig.optJSONObject("common");
+				if(jsonConfigCommon != null) commonConfig.add(jsonConfigCommon);
+			}
+
+			File xmlFileOut = xmlFileOutSelection.getLastSelectedFile();
+			if(xmlFileOut != null) {
+				SqliteConverterExportConfig currConfig = commonConfig;
+				if(exportConfig != null) {
+					JSONObject jsonConfigCurr = exportConfig.optJSONObject("xml");
+					if(jsonConfigCurr != null) {
+						currConfig = new SqliteConverterExportConfig(commonConfig);
+						currConfig.add(jsonConfigCurr);
+					}
+				}
+				export(xmlFileOut, ExportFormat.XML, currConfig);
+			}
+
+		}
+
+	}
+}

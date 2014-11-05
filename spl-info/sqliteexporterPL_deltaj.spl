@@ -1,0 +1,41 @@
+SPL sqliteexporterPL_deltaj {
+
+	Features = {sqliteexporterPL, Base, Log, ConsoleLog, WindowLog, FileLog, UserInterface, GUI, CLI, Export, XML, JSON}
+
+	Deltas = {dBase, dConsoleLog, dWindowLog, dFileLog, dGUI, dCLI, dXML, dJSON}
+
+	Constraints {
+		// Put boolean expression representation of the feature model here.
+		sqliteexporterPL & Base & Log & UserInterface & Export;
+		Log & (ConsoleLog ^ WindowLog ^ FileLog);
+		UserInterface & (GUI ^ CLI);
+		Export & (XML | JSON);		
+	}
+
+	Partitions {
+		// Put mapping between deltas and feature configurations here.
+		{dBase} when (Base);
+		{dConsoleLog} when (ConsoleLog);
+		{dWindowLog} when (WindowLog);
+		{dFileLog} when (FileLog);
+		{dGUI} when (GUI);
+		{dCLI} when (CLI);
+		{dXML} when (XML);
+		{dJSON} when (JSON);
+	}
+
+	Products {
+		// Put product definitions here.
+		ConsoleLog_XML_JSON = {Base, ConsoleLog, XML, JSON, GUI};
+		ConsoleLog_XML = {Base, ConsoleLog, XML, GUI};
+		ConsoleLog_JSON = {Base, ConsoleLog, JSON, GUI};
+
+		WindowLog_XML_JSON = {Base, WindowLog, GUI, XML,JSON};
+		WindowLog_XML = {Base, WindowLog, GUI, XML};
+		WindowLog_JSON = {Base, WindowLog, GUI, JSON};
+
+		FileLog_XML_JSON = {Base, FileLog, XML, JSON, GUI};
+		FileLog_XML = {Base, FileLog, XML, GUI};
+		FileLog_JSON = {Base, FileLog, JSON, GUI};		 
+	}
+}

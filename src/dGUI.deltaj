@@ -1,0 +1,293 @@
+delta dGUI {
+	adds {
+		package com.wappworks.common.swing;
+
+		import java.awt.event.ActionEvent;
+		import java.awt.event.ActionListener;
+		import java.io.File;
+
+		import javax.swing.JButton;
+		import javax.swing.JFileChooser;
+		import javax.swing.JPanel;
+		import javax.swing.JTextField;
+		import javax.swing.event.ChangeEvent;
+		import javax.swing.event.ChangeListener;
+		import javax.swing.event.EventListenerList;
+		import javax.swing.filechooser.FileNameExtensionFilter;
+
+		import com.wappworks.common.log.LogWriter;
+
+		public class PanelFileSelection extends JPanel implements ActionListener {
+
+		/**
+	 * 
+	 */
+			private static final long serialVersionUID = 1L;
+
+			private JTextField textField;
+			private JButton button;
+			private FileNameExtensionFilter fileNameFilter;
+			private boolean isInputFile;
+			private LogWriter logWriter;
+
+			private EventListenerList eventListeners;
+			private ChangeEvent changeEvent;
+
+			public PanelFileSelection(String label, FileNameExtensionFilter
+				inFileNameFilter, boolean inIsInputFile, int textFieldColumns) {
+				super();
+
+				eventListeners = new EventListenerList();
+				changeEvent = new ChangeEvent(this);
+
+				logWriter = null;
+
+				fileNameFilter = inFileNameFilter;
+				isInputFile = inIsInputFile;
+
+				textField = new JTextField();
+				textField.setEditable(false);
+				textField.setColumns(textFieldColumns);
+				button = new JButton(label);
+				button.addActionListener(this);
+				add(textField);
+				add(button);
+			}
+
+			public PanelFileSelection(String label, FileNameExtensionFilter
+				inFileNameFilter, boolean isInputFile) {
+				this(label, inFileNameFilter, isInputFile, 48);
+			}
+
+			public void addChangeListener(ChangeListener listener) {
+				eventListeners.add(ChangeListener.class, listener);
+			}
+
+			public void removeChangeListener(ChangeListener listener) {
+				eventListeners.remove(ChangeListener.class, listener);
+			}
+
+			public void setLogWriter(LogWriter inLogWriter) {
+				logWriter = inLogWriter;
+			}
+
+			public void setLastSelectedFile(String filePath) {
+				textField.setText(filePath);
+			}
+
+			public void setLastSelectedFile(File inFile) {
+				textField.setText(inFile.getAbsolutePath());
+			}
+
+			public File getLastSelectedFile() {
+				String filePath = textField.getText();
+				if(filePath.length() <= 0) return(null);
+
+				return(new File(filePath));
+			}
+
+			public String getLastSelectedFilePath() {
+				return(textField.getText());
+			}
+
+			@Override
+			public void actionPerformed(ActionEvent evt) {
+				if(evt.getSource() == button) {
+					handleShowFileChooser();
+				}
+			}
+
+			private void handleShowFileChooser() {
+				JFileChooser fileChooser = new JFileChooser();
+				if(fileNameFilter != null) fileChooser.setFileFilter(fileNameFilter);
+
+				File lastSelectedFile = getLastSelectedFile();
+				if(lastSelectedFile != null) {
+					fileChooser.setSelectedFile(lastSelectedFile);
+				}
+
+				// Request the import file name
+				int fcResult;
+				if(isInputFile) fcResult = fileChooser.showOpenDialog(this);
+				else fcResult = fileChooser.showSaveDialog(this);
+
+				if(fcResult != JFileChooser.APPROVE_OPTION) {
+					return;
+				}
+
+				File fcFile = fileChooser.getSelectedFile();
+				if(isInputFile && ! fcFile.exists()) {
+					addLogText(String.format("Input file '%1$s' does not exist. Ignoring...",
+							fcFile.getAbsolutePath()));
+					return;
+				}
+
+				String filePath = fcFile.getAbsolutePath();
+				textField.setText(filePath);
+				fireChangeEvent();
+			}
+
+			private void fireChangeEvent() {
+				ChangeListener [] listeners =
+				eventListeners.getListeners(ChangeListener.class);
+				for(ChangeListener currListener : listeners) {
+					currListener.stateChanged(changeEvent);
+				}
+			}
+
+			private void addLogText(String logText) {
+				if(logWriter == null) return;
+
+				logWriter.logAppend(logText);
+			}
+		}
+
+	}
+	modifies com.wappworks.app.SqliteExporterFrame {
+		adds import java.awt.BorderLayout;
+		adds import java.awt.Dimension;
+		adds import java.awt.Toolkit;
+				
+		adds import org.json.JSONException;
+		adds import org.json.JSONObject;
+		
+		adds private JPanel window;
+		adds private JPanel topPanel = new JPanel();
+		adds private JButton exportButton;
+		adds private PanelFileSelection dbFileInSelection;
+		adds private PanelFileSelection configFileInSelection;
+		adds private Preferences prefs;
+
+		adds public static void doMain(String args []) {
+		//Create and set up the window.
+			JFrame frame = new JFrame("SQLite Exporter");
+			frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+
+			//Add content to the window.
+			SqliteExporterFrame exporterFrame = new SqliteExporterFrame();
+			frame.add(exporterFrame.window);
+
+			//Display the window.
+			frame.pack();
+			centerWindow(frame);
+			frame.setVisible(true);
+		}
+
+		adds static void centerWindow(JFrame frame) {
+		// Get the size of the screen
+			Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+
+			// Determine the new location of the window
+			int w = frame.getSize().width;
+			int h = frame.getSize().height;
+			int x =(screenSize.width - w) / 2;
+			int y =(screenSize.height - h) / 2;
+
+			// Move the window
+			frame.setLocation(x, y);
+		}
+
+		adds public void setupButtons() {
+			topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.PAGE_AXIS));
+
+			dbFileInSelection = new PanelFileSelection("Input DB...", fileFilterSqlite,
+				true);
+			dbFileInSelection.addChangeListener(this);
+			dbFileInSelection.setLogWriter(logWriter);
+			topPanel.add(dbFileInSelection);
+
+			configFileInSelection = new PanelFileSelection("Config File...",
+				fileFilterConfig, true);
+			configFileInSelection.addChangeListener(this);
+			configFileInSelection.setLogWriter(logWriter);
+			topPanel.add(configFileInSelection);
+		}
+
+		adds private void restorePrefs() {
+			prefs = Preferences.userNodeForPackage(this.getClass());
+
+			dbFileInSelection.setLastSelectedFile(prefs.get(PREF_FILEPATH_DB, ""));
+			configFileInSelection.setLastSelectedFile(prefs.get(PREF_FILEPATH_CONFIG,
+					""));
+		}
+
+		adds public void actionPerformed(ActionEvent evt) {
+			if(evt.getSource() == exportButton) {
+				handleExportGui();
+				endExport();
+			}
+		}
+
+		adds public void stateChanged(ChangeEvent evt) {
+			if(evt.getSource() == dbFileInSelection) {
+				addLogText(String.format("Selected SQLite file '%1$s' for import",
+						dbFileInSelection.getLastSelectedFilePath()));
+				prefs.put(PREF_FILEPATH_DB, dbFileInSelection.getLastSelectedFilePath());
+				return;
+			}
+
+			if(evt.getSource() == configFileInSelection) {
+				addLogText(String.format("Selected file '%1$s' to configure export options",
+						configFileInSelection.getLastSelectedFilePath()));
+				prefs.put(PREF_FILEPATH_CONFIG,
+					configFileInSelection.getLastSelectedFilePath());
+				return;
+			}
+		}
+
+		adds public void handleExportGui() {
+		// Set up the common export configuration
+			SqliteConverterExportConfig commonConfig = new SqliteConverterExportConfig();
+			JSONObject exportConfig = getExportConfig();
+			if(exportConfig != null) {
+				JSONObject jsonConfigCommon = exportConfig.optJSONObject("common");
+				if(jsonConfigCommon != null) commonConfig.add(jsonConfigCommon);
+			}
+
+			// Begin the export
+			File dbFileIn = dbFileInSelection.getLastSelectedFile();
+			if(dbFileIn == null) {
+				addLogText("Sqlite DB file not specified. Aborting...");
+				return;
+			}
+
+			if(! beginExport(dbFileIn)) {
+				addLogText("Cannot initiate DB export. Aborting...");
+				return;
+			}
+		}
+
+		adds private JSONObject getExportConfig() {
+			File configFileIn = configFileInSelection.getLastSelectedFile();
+			if(configFileIn == null) return(null);
+
+			String configString =
+			WappFile.readFileAsString(configFileIn.getAbsolutePath(),
+				CONFIGFILE_SIZE_MAX);
+			if(configString == null) return(null);
+
+			try {
+				JSONObject jsonConfig = new JSONObject(configString);
+				return(jsonConfig);
+			}
+			catch(JSONException e) {
+				addLogText(String.format("WARNING: Ignoring configuration file '%1$s' because of invalid data: [%2$s]",
+						configFileIn.getAbsolutePath(), e.getMessage()));
+				return(null);
+			}
+		}
+
+		modifies doSqliteExporterFrame() {
+			window = new JPanel(new BorderLayout());
+			original();			
+			setupButtons();
+			exportButton = new JButton("Sqlite Export");
+			exportButton.addActionListener(this);
+			topPanel.add(exportButton);
+			window.add(topPanel, BorderLayout.PAGE_START);
+
+			restorePrefs();
+		}
+
+	}
+}

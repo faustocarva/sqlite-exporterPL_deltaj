@@ -1,0 +1,485 @@
+delta dBase {
+
+	adds {
+		package com.wappworks.common.log;
+
+		public interface LogWriter {
+			void setUpLogger(Object obj);
+			void logAppend(String logText);
+		}
+	}
+	adds {
+		package com.wappworks.common.util;
+
+		import java.io.FileInputStream;
+		import java.io.FileNotFoundException;
+		import java.io.IOException;
+		import java.io.InputStreamReader;
+		import java.io.UnsupportedEncodingException;
+
+		public class WappFile {
+		// Read the entire contents of a file as string. Returns null if the operation fails
+			public static String readFileAsString(String filePath, int bytesMax) {
+				return(readFileAsString(filePath, bytesMax, null));
+			}
+
+			public static String readFileAsString(String filePath, int lengthMax, String
+				charEncoding) {
+				try {
+					InputStreamReader inputStream;
+					if(charEncoding == null) inputStream = new InputStreamReader(new
+						FileInputStream(filePath));
+					else inputStream = new InputStreamReader(new FileInputStream(filePath),
+						charEncoding);
+
+					char [] fileContent = new char[lengthMax + 1];
+					int readLength = inputStream.read(fileContent, 0, lengthMax);
+					inputStream.close();
+
+					if(readLength < 0) return(null);
+
+					fileContent[readLength] = 0;
+					return(new String(fileContent));
+				}
+				catch(FileNotFoundException e) {
+					return(null);
+				}
+				catch(UnsupportedEncodingException e) {
+					return(null);
+				}
+				catch(IOException e) {
+					return(null);
+				}
+			}
+		}
+
+	}
+	adds {
+		package com.wappworks.common.util;
+
+		import java.util.regex.Matcher;
+		import java.util.regex.Pattern;
+
+		public class WappPath {
+		// The following regular expression parts are:
+		// ^(?:/*)?			Potentially starts with '/' but don't capture
+		// (.*/)			Capture up to the last '/'
+			private static final String REGEX_CLASSPATHNAMEMATCH = "^(?:/*)?(.*/)";
+
+			private static Pattern classPathNamePattern =
+			Pattern.compile(REGEX_CLASSPATHNAMEMATCH);
+
+			public static String getClassPath(Class targetClass) {
+				String classFilePath =
+				targetClass.getProtectionDomain().getCodeSource().getLocation().getPath();
+
+				Matcher pathMatcher = classPathNamePattern.matcher(classFilePath);
+				if(pathMatcher.groupCount() > 0) return(pathMatcher.group(1));
+
+				return(classFilePath);
+			}
+
+			public static String getWorkingPath() {
+				return(System.getProperty("user.dir"));
+			}
+		}
+
+	}
+	adds {
+		package com.wappworks.app.sqlite;
+
+		import java.util.ArrayList;
+		import java.util.Arrays;
+		import java.util.Hashtable;
+		import java.util.Iterator;
+		import java.util.List;
+		import java.util.Map;
+
+		import org.json.JSONArray;
+		import org.json.JSONException;
+		import org.json.JSONObject;
+
+		public class SqliteConverterExportConfig {
+			List<String> excludeList;
+			Map<String, String> tablePrimaryKeys;
+
+			public SqliteConverterExportConfig(JSONObject jsonConfig) {
+				init(null, null);
+				add(jsonConfig);
+			}
+
+			public SqliteConverterExportConfig(SqliteConverterExportConfig src) {
+				excludeList = new ArrayList<String>(src.excludeList);
+				tablePrimaryKeys = new Hashtable<String, String>(src.tablePrimaryKeys);
+			}
+
+			public SqliteConverterExportConfig(List<String> inExcludeList, Map<String,
+					String> inTablePrimaryKeys) {
+				init(inExcludeList, inTablePrimaryKeys);
+			}
+
+			public SqliteConverterExportConfig(String [] inExcludeList, Map<String,
+					String> inTablePrimaryKeys) {
+				init(Arrays.asList(inExcludeList), inTablePrimaryKeys);
+			}
+
+			public SqliteConverterExportConfig(Map<String, String> inTablePrimaryKeys) {
+				init(null, inTablePrimaryKeys);
+			}
+
+			public SqliteConverterExportConfig(List<String> inExcludeList) {
+				init(inExcludeList, null);
+			}
+
+			public SqliteConverterExportConfig(String [] inExcludeList) {
+				init(Arrays.asList(inExcludeList), null);
+			}
+
+			public SqliteConverterExportConfig() {
+				init(null, null);
+			}
+
+			public void add(SqliteConverterExportConfig source) {
+				tablePrimaryKeys.putAll(source.tablePrimaryKeys);
+				excludeList.addAll(source.excludeList);
+			}
+
+			public void add(JSONObject jsonConfig) {
+			// Import the key map information (if available)...
+				JSONObject keyMap = jsonConfig.optJSONObject("keys");
+				if(keyMap != null) {
+					Iterator<String> keys = keyMap.keys();
+					while(keys.hasNext()) {
+						String currKey = keys.next();
+						try {
+							tablePrimaryKeys.put(currKey, keyMap.getString(currKey));
+						}
+						catch(JSONException e) {
+						}
+					}
+				}
+
+				// Import the filter list information (if available)...
+				JSONArray excludes = jsonConfig.optJSONArray("excludes");
+				if(excludes != null) {
+					int excludesNum = excludes.length();
+					for(int excludeIndex = 0;
+						excludeIndex < excludesNum;
+						excludeIndex ++) {
+						try {
+							String currExclude = excludes.getString(excludeIndex);
+							excludeList.add(currExclude);
+						}
+						catch(JSONException e) {
+						}
+					}
+				}
+			}
+
+			public List<String> getExcludeList() {
+				return(excludeList);
+			}
+
+			public Map<String, String> getTablePrimaryKeys() {
+				return(tablePrimaryKeys);
+			}
+
+			private void init(List<String> inExcludeList, Map<String, String>
+				inTablePrimaryKeys) {
+				excludeList = inExcludeList;
+				if(excludeList == null) excludeList = new ArrayList<String>();
+
+				tablePrimaryKeys = inTablePrimaryKeys;
+				if(tablePrimaryKeys == null) tablePrimaryKeys = new Hashtable<String,
+					String>();
+			}
+		}
+	}
+
+	adds {
+		package com.wappworks.app.sqlite;
+
+		import java.sql.Connection;
+		import java.sql.ResultSet;
+		import java.sql.SQLException;
+		import java.sql.Statement;
+		import java.util.Hashtable;
+
+		import com.wappworks.common.log.LogWriter;
+
+		public class SqliteTableHandler {
+			private enum FieldType {
+				INTEGER, FLOAT, STRING
+			};
+
+			private LogWriter logWriter;
+			private Connection dbConn;
+			private String tableName;
+			private Hashtable<String, FieldType> fieldInfo;
+
+			public SqliteTableHandler(String inTableName, Connection inDbConn, LogWriter
+				inLogWriter) throws SQLException {
+				logWriter = inLogWriter;
+				dbConn = inDbConn;
+				tableName = inTableName;
+				fieldInfo = new Hashtable<String, FieldType>();
+
+				logWriter.logAppend(String.format("Reading column names for table '%1$s'",
+						tableName));
+
+				Statement dbStat = dbConn.createStatement();
+				ResultSet rs =
+				dbStat.executeQuery(String.format("PRAGMA table_info('%1$s');",
+						tableName));
+				try {
+					while(rs.next()) {
+						fieldInfo.put(rs.getString("name"),
+							fieldTypeStringToFieldType(rs.getString("type")));
+					}
+				}
+				finally {
+					rs.close();
+				}
+			}
+
+			public String getName() {
+				return(tableName);
+			}
+
+			private FieldType fieldTypeStringToFieldType(String ident) {
+				if(ident.equals("INTEGER") || ident.equals("NUMERIC"))
+				return(FieldType.INTEGER);
+				if(ident.equals("FLOAT") || ident.equals("REAL")) return(FieldType.FLOAT);
+
+				return(FieldType.STRING);
+			}
+
+			private void addLogText(String logText) {
+				logWriter.logAppend(logText);
+			}
+		}
+
+	}
+	adds {
+		package com.wappworks.app.sqlite;
+
+		import java.io.File;
+		import java.sql.Connection;
+		import java.sql.DriverManager;
+		import java.sql.ResultSet;
+		import java.sql.SQLException;
+		import java.sql.Statement;
+		import java.util.Vector;
+
+		import com.wappworks.common.log.LogWriter;
+
+		public class SqliteConverter {
+			public enum ExportFormat {
+				XML, JSON
+			};
+
+			private LogWriter logWriter;
+			private Connection dbConn = null;
+			private Vector<SqliteTableHandler> tableHandlers;
+
+			public SqliteConverter(LogWriter inLogWriter) {
+				logWriter = inLogWriter;
+			}
+
+			public Boolean init(File dbFile) {
+				logWriter.logAppend("Sqlite database load commencing");
+
+				try {
+					Class.forName("org.sqlite.JDBC");
+					dbConn = DriverManager.getConnection("jdbc:sqlite:" + dbFile.getPath());
+
+					tableHandlers = processSchema();
+				}
+				catch(ClassNotFoundException e) {
+					logWriter.logAppend(String.format("Class not found exception occurred while initializing converter:\n%1$s",
+							e.toString()));
+					return(false);
+				}
+				catch(SQLException e) {
+					logWriter.logAppend(String.format("Class not found exception occurred while initializing converter:\n%1$s",
+							e.toString()));
+					return(false);
+				}
+
+				logWriter.logAppend("Sqlite database load complete");
+
+				return(true);
+			}
+
+			public Boolean deInit() {
+				try {
+					if(dbConn != null) dbConn.close();
+				}
+				catch(SQLException e) {
+					return(false);
+				}
+
+				dbConn = null;
+				tableHandlers = null;
+
+				logWriter.logAppend("Sqlite database closed");
+
+				return(true);
+			}
+
+			private Vector<SqliteTableHandler> processSchema() throws SQLException {
+				Vector<SqliteTableHandler> tableHandlers = new
+				Vector<SqliteTableHandler>();
+
+				// Get the table names
+				Statement dbStat = dbConn.createStatement();
+				ResultSet rs =
+				dbStat.executeQuery("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;");
+				try {
+					while(rs.next()) {
+						String tableName = rs.getString("name");
+						logWriter.logAppend(String.format("Processing schema for table '%1$s'",
+								tableName));
+						SqliteTableHandler tableHandler = new SqliteTableHandler(tableName,
+							dbConn, logWriter);
+						tableHandlers.add(tableHandler);
+					}
+				}
+				finally {
+					rs.close();
+				}
+
+				return(tableHandlers);
+			}
+
+			public Boolean export(File outFile, ExportFormat format) {
+				return(export(outFile, format, new SqliteConverterExportConfig()));
+			}
+
+			public Boolean export(File outFile, ExportFormat format,
+				SqliteConverterExportConfig config) {
+				return false;
+			}
+
+		}
+	}
+	adds {
+		package com.wappworks.app;
+
+		import java.io.File;
+
+		import com.wappworks.app.sqlite.SqliteConverter;
+		import com.wappworks.app.sqlite.SqliteConverterExportConfig;
+		import com.wappworks.common.log.LogWriter;
+
+		public class SqliteExporter {
+			public LogWriter logWriter = null;
+			private SqliteConverter converter = null;
+
+			public SqliteExporter() {
+				dosetLogWriter();
+			}
+
+			public void setLogWriter(LogWriter inLogWriter) {
+				logWriter = inLogWriter;
+			}
+
+			protected boolean beginExport(File dbFile) {
+				if(converter != null) {
+					addLogText("Attempting to start another export while an existing one is in progress. Skipping...");
+					return(false);
+				}
+
+				converter = new SqliteConverter(logWriter);
+				if(! converter.init(dbFile)) {
+					addLogText("Sqlite DB file is invalid. Aborting...");
+					return(false);
+				}
+
+				return(true);
+			}
+
+			protected boolean export(File exportFile, SqliteConverter.ExportFormat
+				format, SqliteConverterExportConfig exportConfig) {
+				if(converter == null) {
+					addLogText(String.format("Trying to export to file '%s' without starting up export. Aborting... ",
+							exportFile.getAbsolutePath()));
+					return(false);
+				}
+
+				if(! converter.export(exportFile, format, exportConfig)) {
+					addLogText("Failed to export data to file " +
+						exportFile.getAbsolutePath());
+					return(false);
+				}
+
+				return(true);
+			}
+
+			protected void endExport() {
+				if(converter == null) return;
+
+				converter.deInit();
+				converter = null;
+			}
+
+			protected void addLogText(String logText) {
+				if(logWriter == null) return;
+
+				logWriter.logAppend(logText);
+			}
+		}
+	}
+	adds {
+		package com.wappworks.app;
+
+		import java.awt.event.ActionEvent;
+		import java.awt.event.ActionListener;
+		import java.io.File;
+		import java.util.prefs.Preferences;
+
+		import javax.swing.BoxLayout;
+		import javax.swing.JButton;
+		import javax.swing.JFrame;
+		import javax.swing.JPanel;
+		import javax.swing.JScrollPane;
+		import javax.swing.JTextArea;
+		import javax.swing.event.ChangeEvent;
+		import javax.swing.event.ChangeListener;
+		import javax.swing.filechooser.FileNameExtensionFilter;
+
+
+		import com.wappworks.app.sqlite.SqliteConverterExportConfig;
+		import com.wappworks.app.sqlite.SqliteConverter.*;
+		import com.wappworks.common.log.LogWriter;
+		import com.wappworks.common.swing.PanelFileSelection;
+		import com.wappworks.common.util.WappFile;
+
+		public class SqliteExporterFrame extends SqliteExporter implements
+		ActionListener, ChangeListener {
+			private static final long serialVersionUID = 2118422283602674154L;
+
+			private static final int CONFIGFILE_SIZE_MAX = 32*1024;
+
+			private static final String PREF_FILEPATH_DB = "filepath_db";
+			private static final String PREF_FILEPATH_CONFIG = "filepath_config";
+
+			private static final FileNameExtensionFilter fileFilterSqlite = new
+			FileNameExtensionFilter("Sqlite DB (s3db)", "s3db");
+			private static final FileNameExtensionFilter fileFilterConfig = new
+			FileNameExtensionFilter("Config (txt, conf, cfg)", "txt", "conf", "cfg");
+
+			public static void main(String args []) {
+				doMain(args);
+			}
+
+			public SqliteExporterFrame() {
+				super();
+				doSqliteExporterFrame();				
+			}
+			
+			public void doSqliteExporterFrame() {
+			}			
+		}
+	}
+}

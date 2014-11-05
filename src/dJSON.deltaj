@@ -1,0 +1,264 @@
+delta dJSON {
+	modifies com.wappworks.app.sqlite.SqliteTableHandler {
+
+		adds import java.util.List;
+		adds import java.util.Map;
+		adds import org.json.JSONArray;
+		adds import org.json.JSONException;
+		adds import org.json.JSONObject;
+
+		adds public Boolean exportTableToJson(JSONObject jsonOut,
+			SqliteConverterExportConfig config) throws SQLException {
+			List<String> excludeList = config.getExcludeList();
+			if(excludeList.contains(tableName)) return(true);
+			if(excludeList.size() == 0) excludeList = null;
+
+			String primaryKey = config.getTablePrimaryKeys().get(tableName);
+			if(primaryKey != null && ! fieldInfo.containsKey(primaryKey)) primaryKey =
+			null;
+
+			Object jsonRecords = null;
+			if(primaryKey == null) jsonRecords = getRecordsAsJsonArray(excludeList);
+			else jsonRecords = getRecordsAsJsonObject(excludeList, primaryKey);
+
+			if(jsonRecords != null) {
+				try {
+					jsonOut.put(tableName, jsonRecords);
+				}
+				catch(JSONException e) {
+					addLogText(String.format("Error adding table '%1$s' to JSON output. Skipping record...",
+							tableName));
+				}
+			}
+
+			return(true);
+		}
+
+		adds private JSONArray getRecordsAsJsonArray(List<String> excludeList) throws
+		SQLException {
+			Statement dbStat = dbConn.createStatement();
+			ResultSet rs = dbStat.executeQuery(String.format("select * from '%1$s';",
+					tableName));
+
+			JSONArray jsonRecords = new JSONArray();
+			try {
+				while(rs.next()) {
+					Boolean saveRecord = true;
+					JSONObject jsonRecord = new JSONObject();
+
+					for(Map.Entry<String, FieldType> entry : fieldInfo.entrySet()) {
+						String fieldName = entry.getKey();
+
+						if(excludeList != null) {
+							String fieldRefName = tableName + "." + fieldName;
+							if(excludeList.contains(fieldRefName)) continue;
+						}
+
+						try {
+							addFieldToJson(jsonRecord, rs, entry);
+						}
+						catch(JSONException e) {
+							addLogText(String.format("Error adding field '%2$s' in table '%1$s' to JSON output for record [%3$d]. Skipping record...",
+									tableName, entry.getKey(), rs.getRow()));
+							saveRecord = false;
+						}
+					}
+
+					if(saveRecord) jsonRecords.put(jsonRecord);
+				}
+			}
+			finally {
+				rs.close();
+			}
+
+			return(jsonRecords);
+		}
+
+		adds private void addFieldToJson(JSONObject jsonDest, ResultSet rs,
+			Map.Entry<String, FieldType> fieldInfo) throws JSONException, SQLException {
+			String fieldName = fieldInfo.getKey();
+			switch(fieldInfo.getValue()) {
+				case INTEGER : jsonDest.put(fieldName, rs.getLong(fieldName));
+				break;
+
+				case FLOAT : jsonDest.put(fieldName, rs.getDouble(fieldName));
+				break;
+
+				default : jsonDest.put(fieldName, rs.getString(fieldName));
+				break;
+			}
+		}
+
+		adds private JSONObject getRecordsAsJsonObject(List<String> excludeList,
+			String primaryKey) throws SQLException {
+			Statement dbStat = dbConn.createStatement();
+			ResultSet rs = dbStat.executeQuery(String.format("select * from '%1$s';",
+					tableName));
+
+			JSONObject jsonRecords = new JSONObject();
+			int recordIndex = 0;
+			try {
+				while(rs.next()) {
+					Boolean saveRecord = true;
+					JSONObject jsonRecord = new JSONObject();
+
+					for(Map.Entry<String, FieldType> entry : fieldInfo.entrySet()) {
+						String fieldName = entry.getKey();
+
+						if(fieldName.equals(primaryKey)) continue;
+
+						if(excludeList != null) {
+							String fieldRefName = tableName + "." + fieldName;
+							if(excludeList.contains(fieldRefName)) continue;
+						}
+
+						try {
+							addFieldToJson(jsonRecord, rs, entry);
+						}
+						catch(JSONException e) {
+							addLogText(String.format("Error adding field '%2$s' in table '%1$s' to JSON output for record [%3$d]. Skipping record...",
+									tableName, entry.getKey(), rs.getRow()));
+							saveRecord = false;
+						}
+					}
+
+					if(saveRecord) {
+						String recordName = rs.getString(primaryKey);
+						if(recordName.length() <= 0) recordName = "undef_" + recordIndex;
+						if(jsonRecords.has(recordName)) recordName += "_dupe_" + recordIndex;
+
+						try {
+							jsonRecords.put(recordName, jsonRecord);
+						}
+						catch(JSONException e) {
+							addLogText(String.format("Error adding record '%2$s' in table '%1$s' to JSON output. Skipping record...",
+									tableName, recordName));
+						}
+					}
+
+					recordIndex ++;
+				}
+			}
+			finally {
+				rs.close();
+			}
+
+			return(jsonRecords);
+		}
+	}
+
+	modifies com.wappworks.app.sqlite.SqliteConverter {
+		adds import java.io.BufferedWriter;
+		adds import java.io.FileWriter;
+		adds import java.io.IOException;
+		adds import org.json.JSONException;
+		adds import org.json.JSONObject;
+
+		adds private Boolean exportToJson(File jsonFile, SqliteConverterExportConfig
+			config) {
+			logWriter.logAppend("JSON export commencing");
+
+			// Handle the export...
+			try {
+				FileWriter fStream = new FileWriter(jsonFile);
+				BufferedWriter fOut = new BufferedWriter(fStream);
+				JSONObject jsonOut = new JSONObject();
+
+				exportTablesToJson(jsonOut, config);
+				fOut.write(jsonOut.toString(2));
+
+				fOut.close();
+				fStream.close();
+			}
+			catch(IOException e) {
+				logWriter.logAppend(String.format("I/O error encountered trying to output database to file '%1$s'",
+						jsonFile.getAbsolutePath()));
+				return(false);
+			}
+			catch(JSONException e) {
+				logWriter.logAppend(String.format("Error encoding database file '%1$s' into JSON",
+						jsonFile.getAbsolutePath()));
+			}
+
+			logWriter.logAppend("JSON export complete");
+			return(true);
+		}
+
+		adds private void exportTablesToJson(JSONObject jsonOut,
+			SqliteConverterExportConfig config) {
+			for(SqliteTableHandler tableHandler : tableHandlers) {
+				try {
+					logWriter.logAppend(String.format("Exporting contents for table '%1$s'",
+							tableHandler.getName()));
+					tableHandler.exportTableToJson(jsonOut, config);
+				}
+				catch(SQLException e) {
+					logWriter.logAppend(String.format("SQL exception occured trying to export table '%1$s'",
+							tableHandler.getName()));
+				}
+			}
+		}
+		modifies export(File outFile, ExportFormat format,
+			SqliteConverterExportConfig config) {
+			original(outFile, format, config);
+			if(format == ExportFormat.JSON) return(exportToJson(outFile, config));
+			else return false;
+
+		}
+	}
+	modifies com.wappworks.app.SqliteExporterFrame {
+		adds private PanelFileSelection jsonFileOutSelection;
+		adds private static final FileNameExtensionFilter fileFilterJson = new
+		FileNameExtensionFilter("JSON (txt, js, json)", "txt", "js", "json");
+		adds private static final String PREF_FILEPATH_JSON = "filepath_json";
+		modifies setupButtons() {
+			original();
+			jsonFileOutSelection = new PanelFileSelection("Output JSON...",
+				fileFilterJson, false);
+			jsonFileOutSelection.addChangeListener(this);
+			jsonFileOutSelection.setLogWriter(logWriter);
+			topPanel.add(jsonFileOutSelection);
+		}
+		modifies restorePrefs() {
+			original();
+			jsonFileOutSelection.setLastSelectedFile(prefs.get(PREF_FILEPATH_JSON, ""));
+		}
+		modifies stateChanged(ChangeEvent evt) {
+			original(evt);
+
+			if(evt.getSource() == jsonFileOutSelection) {
+				addLogText(String.format("Selected JSON export target as '%1$s'",
+						jsonFileOutSelection.getLastSelectedFilePath()));
+				prefs.put(PREF_FILEPATH_JSON,
+					jsonFileOutSelection.getLastSelectedFilePath());
+				return;
+			}
+		}
+
+		modifies handleExportGui() {
+			original();
+
+			// Set up the common export configuration
+			SqliteConverterExportConfig commonConfig = new SqliteConverterExportConfig();
+			JSONObject exportConfig = getExportConfig();
+			if(exportConfig != null) {
+				JSONObject jsonConfigCommon = exportConfig.optJSONObject("common");
+				if(jsonConfigCommon != null) commonConfig.add(jsonConfigCommon);
+			}
+
+			File jsonFileOut = jsonFileOutSelection.getLastSelectedFile();
+			if(jsonFileOut != null) {
+				SqliteConverterExportConfig currConfig = commonConfig;
+				if(exportConfig != null) {
+					JSONObject jsonConfigCurr = exportConfig.optJSONObject("json");
+					if(jsonConfigCurr != null) {
+						currConfig = new SqliteConverterExportConfig(commonConfig);
+						currConfig.add(jsonConfigCurr);
+					}
+				}
+
+				export(jsonFileOut, ExportFormat.JSON, currConfig);
+			}
+		}
+	}
+}

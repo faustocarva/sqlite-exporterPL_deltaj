@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<spls xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../bin/spls.xsd">
+	<spl name="sqliteexporterPL_deltaj">
+		<features>
+			<feature name ="sqliteexporterPL" />
+			<feature name ="Base" />
+			<feature name ="Log" />
+			<feature name ="ConsoleLog" />
+			<feature name ="WindowLog" />
+			<feature name ="FileLog" />
+			<feature name ="UserInterface" />
+			<feature name ="GUI" />
+			<feature name ="CLI" />
+			<feature name ="Export" />
+			<feature name ="XML" />
+			<feature name ="JSON" />
+		</features>
+		<configurations>
+			<configuration formula="sqliteexporterPL AND Base AND Log AND UserInterface AND Export" />
+			<configuration formula="Log AND (ConsoleLog XOR WindowLog XOR FileLog)" />
+			<configuration formula="UserInterface AND (GUI XOR CLI)" />
+			<configuration formula="Export AND (XML OR JSON)" />
+		</configurations>
+		<deltas>
+			<partition>
+				<modul delta="dBase" when="Base" />
+			</partition>
+			<partition>
+				<modul delta="dConsoleLog" when="ConsoleLog" />
+			</partition>
+			<partition>
+				<modul delta="dWindowLog" when="WindowLog" />
+			</partition>
+			<partition>
+				<modul delta="dFileLog" when="FileLog" />
+			</partition>
+			<partition>
+				<modul delta="dGUI" when="GUI" />
+			</partition>
+			<partition>
+				<modul delta="dCLI" when="CLI" />
+			</partition>
+			<partition>
+				<modul delta="dXML" when="XML" />
+			</partition>
+			<partition>
+				<modul delta="dJSON" when="JSON" />
+			</partition>
+		</deltas>
+	</spl>
+</spls>
